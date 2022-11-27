@@ -1,0 +1,173 @@
+#!/bin/bash
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#
+# Usage: wg-ui [ start | stop | restart | status ] [ INTERFACE ]
+#        wg-ui [ update ]                          [ INTERFACE ] [ PORT ]
+# 	 wg-ui [ help | version ]
+# 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#   
+# 2022-11-27 0.1 initial Version
+# 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+SCRIPTNAME=wg-ui
+SCRIPTPATH=/usr/bin
+VERSION=0.1
+WGIF=$2
+WGCONF=/etc/wireguard/${WGIF}.conf
+
+WGUIPORT=$3
+WGUIFILE=wireguard-ui
+
+SERVICE=wg-ui-${WGIF}.service
+SERVICEDIR=/etc/systemd/system
+SERVICEFILE=${SERVICEDIR}/${SERVICE}
+SERVICEFILETEMP=${SERVICE}.temp
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# wg-ui specitic functions
+
+create_service() {
+	cat <<EOF > ${SERVICEFILETEMP}
+[Unit]
+Description=WireGuard-UI service for interface ${WGIF}
+
+[Service]
+Type=simple
+
+ExecStart=${SCRIPTPATH}/${WGUIFILE} -bind-address 0.0.0.0:${WGUIPORT}
+WorkingDirectory=/home/${WGIF}
+ExecStop=/bin/kill -s HUP \$MAINPID
+ExecReload=/bin/kill -s HUP \$MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=5
+
+User=${WGIF}
+Group=${WGIF}
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=network-online.target
+EOF
+	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE}
+	rm ${SERVICEFILETEMP}
+
+	echo "${SERVICEFILE} was created"
+}
+
+update() {
+	WGURL=https://github.com/ngoduykhanh/wireguard-ui/releases
+	VER=$(curl -sI ${WGURL}/latest | grep "location:" | cut -d "/" -f8 | tr -d '\r')
+	WGUITAR=wireguard-ui-${VER}-linux-amd64.tar.gz
+	WGUIFILE=wireguard-ui
+
+	echo "downloading wireguard-ui $VER"
+	curl -sL "${WGURL}/download/${VER}/wireguard-ui-${VER}-linux-amd64.tar.gz" -o wireguard-ui-${VER}-linux-amd64.tar.gz
+
+	echo -n "extracting "; tar xvf ${WGUITAR}
+ 	
+	sudo chown root:root ${WGUIFILE}
+	sudo mv ${WGUIFILE} ${SCRIPTPATH}/${WGUIFILE}
+	rm ${WGUITAR} 
+
+	#create user
+	sudo useradd -m ${WGIF}
+	sudo chown ${WGIF}:root ${WGCONF}
+	sudo chmod 664 ${WGCONF}
+
+	service_del
+	service_add
+
+	sudo systemctl start ${SERVICE} 
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# framework functions
+
+service_add() {
+	create_service
+	sudo systemctl daemon-reload
+	sudo systemctl enable ${SERVICE} 
+	echo "service ${SERVICE} added"
+	echo ""
+	echo "Usage: sudo systemctl start|stop|status ${SERVICE}"
+}
+
+service_del() {
+	sudo systemctl disable ${SERVICE} 
+        sudo rm ${SERVICEFILE}
+	sudo systemctl daemon-reload 
+	echo "service ${SERVICE} deleted"
+}
+
+version() {
+	echo ${SCRIPTNAME}" "${VERSION}
+}
+
+help() {
+	case "$1" in
+	1)
+		echo "Usage: wg-ui [ start | stop | restart | status ] [ INTERFACE ]"
+		echo "       wg-ui [ help ]"
+		;;
+	2)	
+		echo "Usage: wg-ui [ start | stop | restart | status ] [ INTERFACE ]"
+		echo "       wg-ui [ update ]                          [ INTERFACE ] [ PORT ]"
+		echo "       wg-ui [ help | version ]"
+		;;
+	*)	
+		echo "What are you doing?"
+		exit 1
+		;;
+	esac
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# main
+
+case "$2" in
+'')
+	case "$1" in
+	version)
+		version
+		;;
+	help)
+		help 2
+		;;
+	*)
+		help 1
+		exit 1
+		;;
+	esac
+	;;
+*)
+	case "$1" in
+	start|stop|restart|status)
+		sudo systemctl $1 ${SERVICE}
+		;;
+	update)
+		case "$3" in
+			'')
+				help 2
+				exit 1
+				;;
+			*)
+				update
+				;;
+		esac
+		;;
+	help)
+		help 2
+		;;
+	*)
+		help 1
+		exit 1
+		;;
+	esac
+	;;
+esac
+
+exit 0
+
