@@ -12,21 +12,26 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #   
 # 2022-11-25 0.1 initial Version
+# 2022-11-27 0.2 added service for automatic wg restart when manually change wg config
 # 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 SCRIPTNAME=wg-quick-ns
 SCRIPTPATH=/usr/bin
-VERSION=0.1
+VERSION=0.2
 WGIF=$2
 WGCONF=/etc/wireguard/${WGIF}.conf
 WGTUNNELIP=10.0.0.1/32
 NSNAME=${WGIF}-ns
 
-SERVICE=wireguard-${WGIF}
+SERVICE1=wg-server-${WGIF}.service
+SERVICE2=wg-config-${WGIF}.path
+SERVICE3=wg-config-${WGIF}.service
 SERVICEDIR=/etc/systemd/system
-SERVICEFILE=${SERVICEDIR}/${SERVICE}.service
-SERVICEFILETEMP=${SERVICE}.service
+SERVICEFILE1=${SERVICEDIR}/${SERVICE1}
+SERVICEFILE2=${SERVICEDIR}/${SERVICE2}
+SERVICEFILE3=${SERVICEDIR}/${SERVICE3}
+SERVICEFILETEMP=${SERVICE}.temp
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # wg-quick-ns specitic functions
@@ -66,7 +71,7 @@ execute() {
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # framework functions
 
-create_service_file() {
+create_service_wg-server() {
 	cat <<EOF > ${SERVICEFILETEMP}
 [Unit]
 Description=WireGuard ${WGIF} service
@@ -85,25 +90,69 @@ Group=root
 WantedBy=multi-user.target
 WantedBy=network-online.target
 EOF
-	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE}
+	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE1}
 	rm ${SERVICEFILETEMP}
 
-	echo "${SERVICEFILE} was created"
+	echo "${SERVICEFILE1} was created"
 }
 
+create_service_wg-config() {
+# Part 1: tartget file
+	cat <<EOF > ${SERVICEFILETEMP}
+[Unit]
+Description=Watch ${WGCONF} for changes
+
+[Path]
+PathModified=${WGCONF}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE2}
+	rm ${SERVICEFILETEMP}
+
+	echo "${SERVICEFILE2} was created"
+
+# Part 2: service file
+	cat <<EOF > ${SERVICEFILETEMP}
+[Unit]
+Description=restart Wireguard Server ${WGIF}
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart ${SERVICE1}
+
+[Install]
+RequiredBy=${SERVICE2}
+EOF
+
+	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE3}
+	rm ${SERVICEFILETEMP}
+
+	echo "${SERVICEFILE3} was created"
+}
+
+
 service_add() {
-	create_service_file
+	create_service_wg-server
+	create_service_wg-config
 	sudo systemctl daemon-reload
-	sudo systemctl enable ${SERVICE}
-	echo "service ${SERVICE} added"
-	echo "Usage: sudo systemctl start|stop|status ${SERVICE}"
+	sudo systemctl enable ${SERVICE1} ${SERVICE2} ${SERVICE3}
+	echo "service ${SERVICE1}, ${SERVICE2}, ${SERVICE3} added"
+	echo ""
+	echo "Usage: sudo systemctl start|stop|status ${SERVICE1}"
+	echo "       sudo systemctl start|stop|status ${SERVICE2}"
+	echo "       sudo systemctl start|stop|status ${SERVICE3}"
 }
 
 service_del() {
-	sudo systemctl disable ${SERVICE}
-        sudo rm -f ${SERVICEFILE}	
+	sudo systemctl disable ${SERVICE1} ${SERVICE2} ${SERVICE3}
+        sudo rm ${SERVICEFILE1}
+        sudo rm ${SERVICEFILE2}
+        sudo rm ${SERVICEFILE3}
 	sudo systemctl daemon-reload 
-	echo "service ${SERVICE} deleted"
+	echo "service ${SERVICE1}, ${SERVICE2}, ${SERVICE2} deleted"
 }
 
 upgrade() {
