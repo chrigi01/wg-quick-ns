@@ -1,0 +1,210 @@
+#!/bin/bash
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#
+# Usage: wg-quick-ns [ up | down | status ] [ INTERFACE ]
+#        wg-quick-ns [ restart ]            [ INTERFACE ]
+#        wg-quick-ns [ exec ]               [ INTERFACE ] [ statement ]
+#        wg-quick-ns [ service ]            [ INTERFACE ] [ add | del ]
+#        wg-quick-ns [ upgrade ] 
+#        wg-quick-ns [ help | version ] 
+# 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#   
+# 2022-11-25 0.1 initial Version
+# 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+SCRIPTNAME=wg-quick-ns
+SCRIPTPATH=/usr/bin
+VERSION=0.1
+WGIF=$2
+WGCONF=/etc/wireguard/${WGIF}.conf
+WGTUNNELIP=10.0.0.1/32
+NSNAME=${WGIF}-ns
+
+SERVICE=wireguard-${WGIF}
+SERVICEDIR=/etc/systemd/system
+SERVICEFILE=${SERVICEDIR}/${SERVICE}.service
+SERVICEFILETEMP=${SERVICE}.service
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# wg-quick-ns specitic functions
+
+check-config() {
+	if [ ! -f "${WGCONF}" ]; then
+  	  echo "${WGCONF} does not exist."
+	  exit 1
+	fi
+}
+
+up() {
+	check-config
+	sudo /bin/ip netns add ${NSNAME}
+	sudo /bin/ip link add ${WGIF} type wireguard
+	sudo /bin/ip link set ${WGIF} netns ${NSNAME}
+	sudo /bin/ip -n ${NSNAME} addr add ${WGTUNNELIP} dev ${WGIF}
+	sudo /bin/ip netns exec ${NSNAME} wg setconf ${WGIF} ${WGCONF}
+	sudo /bin/ip -n ${NSNAME} link set ${WGIF} up
+	sudo /bin/ip -n ${NSNAME} route add default dev ${WGIF}
+	echo "interface ${WGIF} up"
+}
+
+down() {
+	sudo /bin/ip netns del ${NSNAME}
+	echo "interface ${WGIF} down"
+}
+
+state() {
+	execute "wg show"
+}
+
+execute() {
+	sudo /bin/ip netns exec ${NSNAME} $1
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# framework functions
+
+create_service_file() {
+	cat <<EOF > ${SERVICEFILETEMP}
+[Unit]
+Description=WireGuard ${WGIF} service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+ExecStart=/usr/bin/wg-quick-ns up ${WGIF}
+ExecStop=/usr/bin/wg-quick-ns down ${WGIF}
+
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=network-online.target
+EOF
+	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE}
+	rm ${SERVICEFILETEMP}
+
+	echo "${SERVICEFILE} was created"
+}
+
+service_add() {
+	create_service_file
+	sudo systemctl daemon-reload
+	sudo systemctl enable ${SERVICE}
+	echo "service ${SERVICE} added"
+	echo "Usage: sudo systemctl start|stop|status ${SERVICE}"
+}
+
+service_del() {
+	sudo systemctl disable ${SERVICE}
+        sudo rm -f ${SERVICEFILE}	
+	sudo systemctl daemon-reload 
+	echo "service ${SERVICE} deleted"
+}
+
+upgrade() {
+	# sudo apt-get wireguard curl
+	# curl 
+	sudo cp ${SCRIPTNAME} ${SCRIPTPATH}
+        sudo chown root:root ${SCRIPTPATH}/${SCRIPTNAME}
+        sudo chmod 755 ${SCRIPTPATH}/${SCRIPTNAME}
+	
+	echo "upgraded to"
+        sudo ${SCRIPTPATH}/${SCRIPTNAME} version
+}
+
+version() {
+	echo ${SCRIPTNAME}" "${VERSION}
+}
+
+help() {
+	case "$1" in
+	1)
+		echo "Usage: wg-quick-ns [ up | down | status ] [ INTERFACE ]"
+		echo "       wg-quick-ns [ help ]"
+		;;
+	2)	
+		echo "Usage: wg-quick-ns [ up | down | status ] [ INTERFACE ]"
+		echo "       wg-quick-ns [ restart ]            [ INTERFACE ]"
+		echo "       wg-quick-ns [ exec ]               [ INTERFACE ] [ statement ]"
+		echo "       wg-quick-ns [ service ]            [ INTERFACE ] [ add | del ]"
+		echo "       wg-quick-ns [ upgrade ]"
+		echo "       wg-quick-ns [ help | version ]"
+		;;
+	*)	
+		echo "What are you doing?"
+		exit 1
+		;;
+	esac
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# main
+
+case "$2" in
+'')
+	case "$1" in
+	upgrade)
+		upgrade
+		;;
+	version)
+		version
+		;;
+	help)
+		help 2
+		;;
+	*)
+		help 1
+		exit 1
+		;;
+	esac
+	;;
+*)
+	case "$1" in
+	up)
+		up
+		;;
+	down)	
+		down
+		;;
+	status)
+		state
+		;;
+	restart)
+		down
+		up
+		;;
+	exec)	
+		execute "$3"
+		;;
+	service)
+		case "$3" in
+			add)
+				service_add
+				;;
+			del)
+				service_del
+				;;
+			*)
+				help 2
+				exit 1
+				;;
+		esac
+		;;
+	help)
+		help 2
+		;;
+	*)
+		help 1
+		exit 1
+		;;
+	esac
+	;;
+esac
+
+exit 0
+
