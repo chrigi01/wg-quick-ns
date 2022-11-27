@@ -6,21 +6,23 @@
 #        wg-quick-ns [ restart ]            [ INTERFACE ]
 #        wg-quick-ns [ exec ]               [ INTERFACE ] [ statement ]
 #        wg-quick-ns [ service ]            [ INTERFACE ] [ add | del ]
-#        wg-quick-ns [ upgrade ] 
+#        wg-quick-ns [ update ] 
 #        wg-quick-ns [ help | version ] 
 # 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #   
 # 2022-11-25 0.1 initial Version
 # 2022-11-27 0.2 added service for automatic wg restart when manually change wg config
+# 2022-11-28 0.3 added dirty hack to bypass "wg setconf" limitations
 # 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 SCRIPTNAME=wg-quick-ns
 SCRIPTPATH=/usr/bin
-VERSION=0.2
+VERSION=0.3
 WGIF=$2
 WGCONF=/etc/wireguard/${WGIF}.conf
+WGCONFTMP=/tmp/${WGIF}.conf
 WGTUNNELIP=10.0.0.1/32
 NSNAME=${WGIF}-ns
 
@@ -41,6 +43,20 @@ check-config() {
   	  echo "${WGCONF} does not exist."
 	  exit 1
 	fi
+	
+	# clean wg-config  
+	# due to limitaions of wg setconf 
+
+	cat ${WGCONF} > ${WGCONFTMP} 
+
+	sed -i '/Address =/d' ${WGCONFTMP}
+	sed -i '/MTU =/d' ${WGCONFTMP}
+	sed -i '/PostUp =/d' ${WGCONFTMP}
+	sed -i '/PostDown =/d' ${WGCONFTMP}
+	
+	sudo mv ${WGCONFTMP} ${WGCONF}
+	sudo chmod 666 ${WGCONF} 
+	sudo chown root:root ${WGCONF}
 }
 
 up() {
@@ -155,14 +171,14 @@ service_del() {
 	echo "service ${SERVICE1}, ${SERVICE2}, ${SERVICE2} deleted"
 }
 
-upgrade() {
+update() {
 	# sudo apt-get wireguard curl
 	# curl 
 	sudo cp ${SCRIPTNAME} ${SCRIPTPATH}
         sudo chown root:root ${SCRIPTPATH}/${SCRIPTNAME}
         sudo chmod 755 ${SCRIPTPATH}/${SCRIPTNAME}
 	
-	echo "upgraded to"
+	echo -n "upgraded to "
         sudo ${SCRIPTPATH}/${SCRIPTNAME} version
 }
 
@@ -181,7 +197,7 @@ help() {
 		echo "       wg-quick-ns [ restart ]            [ INTERFACE ]"
 		echo "       wg-quick-ns [ exec ]               [ INTERFACE ] [ statement ]"
 		echo "       wg-quick-ns [ service ]            [ INTERFACE ] [ add | del ]"
-		echo "       wg-quick-ns [ upgrade ]"
+		echo "       wg-quick-ns [ update ]"
 		echo "       wg-quick-ns [ help | version ]"
 		;;
 	*)	
@@ -197,8 +213,8 @@ help() {
 case "$2" in
 '')
 	case "$1" in
-	upgrade)
-		upgrade
+	update)
+		update
 		;;
 	version)
 		version
