@@ -3,23 +3,27 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
 # Usage: wg-ui [ start | stop | restart | status ] [ INTERFACE ]
-#        wg-ui [ update ]                          [ INTERFACE ] [ PORT ]
+#        wg-ui [ update ]                          [ INTERFACE ] [ PORT ] [FQDN]
 # 	 wg-ui [ help | version ]
 # 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #   
 # 2022-11-27 0.1 initial Version
-# 
+# 2022-11-29 0.2 added BASE_PATH for revers proxy config
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 SCRIPTNAME=wg-ui
 SCRIPTPATH=/usr/bin
-VERSION=0.1
+VERSION=0.2
 WGIF=$2
 WGCONF=/etc/wireguard/${WGIF}.conf
+BASEPATH=/${WGIF}
 
 WGUIPORT=$3
+WGUIFQDN=$4
 WGUIFILE=wireguard-ui
+WGUIHOME=/home/${WGIF}
+WGUIENVFILE=${WGUIHOME}/${WGIF}.env
 
 SERVICE=wg-ui-${WGIF}.service
 SERVICEDIR=/etc/systemd/system
@@ -32,27 +36,36 @@ SERVICEFILETEMP=${SERVICE}.temp
 create_service() {
 	cat <<EOF > ${SERVICEFILETEMP}
 [Unit]
-Description=WireGuard-UI service for interface ${WGIF}
+Description=WireGuard UI for ${WGIF}
+Documentation=https://github.com/ngoduykhanh/wireguard-ui
+After=network.target network-online.target
+Requires=network-online.target
+AssertFileIsExecutable=/usr/local/bin/wireguard-ui
 
 [Service]
 Type=simple
-
-ExecStart=${SCRIPTPATH}/${WGUIFILE} -bind-address 0.0.0.0:${WGUIPORT}
-WorkingDirectory=/home/${WGIF}
-ExecStop=/bin/kill -s HUP \$MAINPID
-ExecReload=/bin/kill -s HUP \$MAINPID
-KillSignal=SIGQUIT
-TimeoutStopSec=5
-
+EnvironmentFile=${WGUIENVFILE}
+WorkingDirectory=${WGUIHOME}
+ExecStart=/usr/local/bin/wireguard-ui -bind-address 0.0.0.0:${WGUIPORT} 
+Restart=on-failure
+SyslogIdentifier=${SERVICE}
 User=${WGIF}
 Group=${WGIF}
 
 [Install]
 WantedBy=multi-user.target
-WantedBy=network-online.target
 EOF
 	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE}
 	rm ${SERVICEFILETEMP}
+
+	cat <<EOF > ${WGUIENVFILE}
+WGUI_USERNAME=admin
+WGUI_ENDPOINT_ADDRESS=${WGUIFQDN}
+WGUI_CONFIG_FILE_PATH=${WGCONF}
+BASE_PATH=/${WGIF}
+WGUI_SERVER_INTERFACE_ADDRESSES=10.0.0.1/24
+WGUI_SERVER_LISTEN_PORT=${WGUIPORT}
+EOF
 
 	echo "${SERVICEFILE} was created"
 }
