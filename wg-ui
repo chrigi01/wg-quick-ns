@@ -3,18 +3,19 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
 # Usage: wg-ui [ start | stop | restart | status ] [ INTERFACE ]
-#        wg-ui [ update ]                          [ INTERFACE ] [ PORT ] [FQDN]
+#        wg-ui [ install | update ]                [ INTERFACE ] [ PORT ] [FQDN]
 # 	 wg-ui [ help | version ]
 # 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #   
 # 2022-11-27 0.1 initial Version
 # 2022-11-29 0.2 added BASE_PATH for revers proxy config
+# 2022-11-29 0.3 added install function, minor bug fixes
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 SCRIPTNAME=wg-ui
 SCRIPTPATH=/usr/bin
-VERSION=0.2
+VERSION=0.3
 WGIF=$2
 WGCONF=/etc/wireguard/${WGIF}.conf
 BASEPATH=/${WGIF}
@@ -24,29 +25,33 @@ WGUIFQDN=$4
 WGUIFILE=wireguard-ui
 WGUIHOME=/home/${WGIF}
 WGUIENVFILE=${WGUIHOME}/${WGIF}.env
+WGUIPASSWORD=$( wg genkey )
+WGUIUSERFILE=/home/${WGIF}/db/server/users.json
+GUIEXECPATH=/usr/local/bin
+GUIEXEC=${GUIEXECPATH}/wireguard-ui
 
 SERVICE=wg-ui-${WGIF}.service
 SERVICEDIR=/etc/systemd/system
 SERVICEFILE=${SERVICEDIR}/${SERVICE}
-SERVICEFILETEMP=${SERVICE}.temp
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # wg-ui specitic functions
 
 create_service() {
-	cat <<EOF > ${SERVICEFILETEMP}
+	# gernerate wg-ui service file
+	cat << EOF | sudo tee -a > ${SERVICEFILE}
 [Unit]
 Description=WireGuard UI for ${WGIF}
 Documentation=https://github.com/ngoduykhanh/wireguard-ui
 After=network.target network-online.target
 Requires=network-online.target
-AssertFileIsExecutable=/usr/local/bin/wireguard-ui
+AssertFileIsExecutable=${GUIEXEC}
 
 [Service]
 Type=simple
 EnvironmentFile=${WGUIENVFILE}
 WorkingDirectory=${WGUIHOME}
-ExecStart=/usr/local/bin/wireguard-ui -bind-address 0.0.0.0:${WGUIPORT} 
+ExecStart=${GUIEXEC} -bind-address 0.0.0.0:${WGUIPORT} 
 Restart=on-failure
 SyslogIdentifier=${SERVICE}
 User=${WGIF}
@@ -55,11 +60,13 @@ Group=${WGIF}
 [Install]
 WantedBy=multi-user.target
 EOF
-	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE}
-	rm ${SERVICEFILETEMP}
+}
 
-	cat <<EOF > ${WGUIENVFILE}
+create_wg-environment() {
+	# gernerate wg-ui env file
+	cat << EOF | sudo tee -a > ${WGUIENVFILE}
 WGUI_USERNAME=admin
+WGUI_PASSWORD=${WGUIPASSWORD}
 WGUI_ENDPOINT_ADDRESS=${WGUIFQDN}
 WGUI_CONFIG_FILE_PATH=${WGCONF}
 BASE_PATH=/${WGIF}
@@ -67,7 +74,27 @@ WGUI_SERVER_INTERFACE_ADDRESSES=10.0.0.1/24
 WGUI_SERVER_LISTEN_PORT=${WGUIPORT}
 EOF
 
-	echo "${SERVICEFILE} was created"
+	sudo chown ${WGIF}:${WGIF} ${WGUIENVFILE}
+	
+	echo "==============================="
+	echo "= Settings"
+	echo "= * WGUI-URL=http://${WGUIFQDN}:${WGUIPORT}"
+	echo "= * username=admin"
+	echo "= * password=${WGUIPASSWORD}"
+	echo "==============================="
+}
+
+create_wgconfig () { 
+
+	# gernerate initial wg config file
+	cat << EOF | sudo tee -a > ${WGCONF}
+[Interface]
+Address = 10.0.0.1/24
+ListenPort = ${WGUIPORT}
+PrivateKey = $( wg genkey )
+EOF
+	sudo chown root:${WGIF} ${WGCONF}
+	sudo chmod 664 ${WGCONF}
 }
 
 update() {
@@ -82,18 +109,27 @@ update() {
 	echo -n "extracting "; tar xvf ${WGUITAR}
  	
 	sudo chown root:root ${WGUIFILE}
-	sudo mv ${WGUIFILE} ${SCRIPTPATH}/${WGUIFILE}
+	sudo mv ${WGUIFILE} ${GUIEXEC}
 	rm ${WGUITAR} 
 
-	#create user
-	sudo useradd -m ${WGIF}
-	sudo chown ${WGIF}:root ${WGCONF}
-	sudo chmod 664 ${WGCONF}
-
+	# service renew 
 	service_del
 	service_add
 
-	sudo systemctl start ${SERVICE} 
+	sudo systemctl restart ${SERVICE} 
+}
+
+install() {
+	# inital wg config
+	create_wgconfig 
+
+	# create initial environment
+        create_wg-environment
+
+	# create user
+	sudo useradd -m ${WGIF}
+
+	update
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -127,7 +163,7 @@ help() {
 		;;
 	2)	
 		echo "Usage: wg-ui [ start | stop | restart | status ] [ INTERFACE ]"
-		echo "       wg-ui [ update ]                          [ INTERFACE ] [ PORT ]"
+		echo "       wg-ui [ install | update ]                [ INTERFACE ] [ PORT ] [DOMAIN/URL]"
 		echo "       wg-ui [ help | version ]"
 		;;
 	*)	
@@ -160,17 +196,25 @@ case "$2" in
 	start|stop|restart|status)
 		sudo systemctl $1 ${SERVICE}
 		;;
-	update)
+	install|update)
 		case "$3" in
 			'')
 				help 2
 				exit 1
 				;;
 			*)
-				update
+				case "$4" in
+				'')
+					help 2
+					exit 1
+					;;
+				*)
+					$1
+					;;
+				esac
 				;;
-		esac
-		;;
+			esac
+			;;
 	help)
 		help 2
 		;;

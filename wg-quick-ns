@@ -14,12 +14,14 @@
 # 2022-11-25 0.1 initial Version
 # 2022-11-27 0.2 added service for automatic wg restart when manually change wg config
 # 2022-11-28 0.3 added dirty hack to bypass "wg setconf" limitations
+# 2022-11-28 0.4 added starting services
+# 2022-12-03 0.5 bug fixes
 # 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 SCRIPTNAME=wg-quick-ns
 SCRIPTPATH=/usr/bin
-VERSION=0.3
+VERSION=0.5
 WGIF=$2
 WGCONF=/etc/wireguard/${WGIF}.conf
 WGCONFTMP=/tmp/${WGIF}.conf
@@ -54,9 +56,7 @@ check-config() {
 	sed -i '/PostUp =/d' ${WGCONFTMP}
 	sed -i '/PostDown =/d' ${WGCONFTMP}
 	
-	sudo mv ${WGCONFTMP} ${WGCONF}
-	sudo chmod 666 ${WGCONF} 
-	sudo chown root:root ${WGCONF}
+	cat ${WGCONFTMP} | sudo tee -a > ${WGCONF}
 }
 
 up() {
@@ -88,7 +88,8 @@ execute() {
 # framework functions
 
 create_service_wg-server() {
-	cat <<EOF > ${SERVICEFILETEMP}
+# Part 1: service file
+	cat << EOF | sudo tee -a > ${SERVICEFILE1}
 [Unit]
 Description=WireGuard ${WGIF} service
 
@@ -106,15 +107,13 @@ Group=root
 WantedBy=multi-user.target
 WantedBy=network-online.target
 EOF
-	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE1}
-	rm ${SERVICEFILETEMP}
 
 	echo "${SERVICEFILE1} was created"
 }
 
 create_service_wg-config() {
-# Part 1: tartget file
-	cat <<EOF > ${SERVICEFILETEMP}
+# Part 2: config target file
+	cat << EOF | sudo tee -a > ${SERVICEFILE2}
 [Unit]
 Description=Watch ${WGCONF} for changes
 
@@ -124,13 +123,11 @@ PathModified=${WGCONF}
 [Install]
 WantedBy=multi-user.target
 EOF
-	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE2}
-	rm ${SERVICEFILETEMP}
 
 	echo "${SERVICEFILE2} was created"
 
-# Part 2: service file
-	cat <<EOF > ${SERVICEFILETEMP}
+# Part 3: config service file
+	cat << EOF | sudo tee -a > ${SERVICEFILE3}
 [Unit]
 Description=restart Wireguard Server ${WGIF}
 After=network.target
@@ -143,9 +140,6 @@ ExecStart=/bin/systemctl restart ${SERVICE1}
 RequiredBy=${SERVICE2}
 EOF
 
-	sudo cp ${SERVICEFILETEMP} ${SERVICEFILE3}
-	rm ${SERVICEFILETEMP}
-
 	echo "${SERVICEFILE3} was created"
 }
 
@@ -155,6 +149,9 @@ service_add() {
 	create_service_wg-config
 	sudo systemctl daemon-reload
 	sudo systemctl enable ${SERVICE1} ${SERVICE2} ${SERVICE3}
+	sudo systemctl start ${SERVICE1} 
+	sudo systemctl start ${SERVICE2} 
+	sudo systemctl start ${SERVICE3}
 	echo "service ${SERVICE1}, ${SERVICE2}, ${SERVICE3} added"
 	echo ""
 	echo "Usage: sudo systemctl start|stop|status ${SERVICE1}"
@@ -178,7 +175,7 @@ update() {
         sudo chown root:root ${SCRIPTPATH}/${SCRIPTNAME}
         sudo chmod 755 ${SCRIPTPATH}/${SCRIPTNAME}
 	
-	echo -n "upgraded to "
+	echo -n "updaded to "
         sudo ${SCRIPTPATH}/${SCRIPTNAME} version
 }
 
