@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#
+# Usage: wg-reconnect [ status | install ]    [ INTERFACE ]
+#        wg-reconnect [ help | version | log]
+# 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# 2022-12-04 V0.1 initial version
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+SCRIPTNAME=wg-reconnect
+VERSION=0.1
+WGIF=$2
+PEERIP=10.0.0.1
+LOGFILE=/var/log/${SCRIPTNAME}.log
+CRONFILE=/etc/cron.d/${SCRIPTNAME}-${WGIF}
+TIMESTAMP=$( date +"%Y-%m-%d_%H:%M:%S" )
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# wg-ui specitic functions
+
+check_tunnel() {
+
+	if /bin/ping -c 1 ${PEERIP} &> /dev/null
+	then
+       		echo "${TIMESTAMP} ${WGIF} solid connection to ${PEERIP}" >> ${LOGFILE}
+       		echo "${TIMESTAMP} ${WGIF} solid connection to ${PEERIP}" 
+	else
+        	echo "${TIMESTAMP} ${WGIF} needs to be reconnected" >> ${LOGFILE}
+        	echo "${TIMESTAMP} ${WGIF} needs to be reconnected" 
+        	wg-quick down ${WGIF} 
+        	wg-quick up ${WGIF} 
+		wg show ${WGIF} >> ${LOGFILE}
+        	wg show ${WGIF}
+	fi
+}
+
+install_cron() {
+	# gernerate cronfile
+	sudo touch ${CRONFILE}
+	sudo chmod 644 ${CRONFILE}
+	cat << EOF | sudo tee -a > ${CRONFILE}
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+* * * * * root /root/wg-reconnect 
+EOF
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# framework functions
+
+status() {
+	check_tunnel
+}
+
+install() {
+	install_cron
+	echo "install done"
+}
+
+log() {
+	more ${LOGFILE} 
+}
+version() {
+	echo "${0} version ${VERSION}"
+}
+
+help() {
+	echo " Usage: wg-reconnect [ status ]   [ INTERFACE ]"
+	echo "        wg-reconnect [ install ]  [ INTERFACE ]"
+	echo "        wg-reconnect [ help | version | log ]"
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# main
+
+
+case "$1" in
+'')
+	$0 "status" "wg0" 	
+	;;
+
+help|version|log)
+	$1
+	;;
+*)
+	case "$2" in
+	'')
+  		help
+		exit 1	
+		;;
+	*)
+		case "$1" in
+		status|install)
+			$1
+			;;
+		*)
+			help 
+			exit 1
+			;;
+		esac
+		;;
+	esac
+	;;
+esac
+
+exit 0
+
