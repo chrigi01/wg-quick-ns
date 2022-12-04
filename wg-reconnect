@@ -24,7 +24,6 @@ check_tunnel() {
 
 	if /bin/ping -c 1 ${PEERIP} &> /dev/null
 	then
-       		echo "${TIMESTAMP} ${WGIF} solid connection to ${PEERIP}" >> ${LOGFILE}
        		echo "${TIMESTAMP} ${WGIF} solid connection to ${PEERIP}" 
 	else
         	echo "${TIMESTAMP} ${WGIF} needs to be reconnected" >> ${LOGFILE}
